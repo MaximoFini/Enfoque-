@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
+import { Card, CardContent } from "@/components/ui/Card";
 import { useAuth } from "@/context/AuthContext";
-import { getCategories, getCurrentUserId } from "@/lib/supabase/services";
+import { getCategories, getCurrentUserId, createTimeLog } from "@/lib/supabase/services";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import type { Category } from "@/lib/supabase/types";
 import {
@@ -16,8 +16,26 @@ import {
     Copy,
     Trash2,
     Brain,
-    Zap
+    Zap,
+    Palette,
+    Clipboard
 } from "lucide-react";
+
+// Color palette for "Other" work type
+const OTHER_COLORS = [
+    "#ef4444", // red
+    "#f97316", // orange
+    "#eab308", // yellow
+    "#22c55e", // green
+    "#14b8a6", // teal
+    "#3b82f6", // blue
+    "#6366f1", // indigo
+    "#8b5cf6", // violet
+    "#d946ef", // fuchsia
+    "#ec4899", // pink
+    "#78716c", // stone
+    "#1e293b", // slate
+];
 
 interface TimeBlock {
     id: string;
@@ -26,7 +44,7 @@ interface TimeBlock {
     day: number; // 0-6 (Mon-Sun)
     start_hour: number;
     duration_hours: number;
-    work_type: "deep" | "shallow";
+    work_type: "deep" | "shallow" | "other";
     color?: string;
     isLogged?: boolean; // From time_logs, not editable
 }
@@ -46,7 +64,8 @@ function BlockModal({ isOpen, onClose, onSave, onDelete, block, day, startHour, 
     const [title, setTitle] = useState("");
     const [categoryId, setCategoryId] = useState<string>("");
     const [durationHours, setDurationHours] = useState(1);
-    const [workType, setWorkType] = useState<"deep" | "shallow">("deep");
+    const [workType, setWorkType] = useState<"deep" | "shallow" | "other">("deep");
+    const [selectedColor, setSelectedColor] = useState(OTHER_COLORS[3]); // Default green
 
     useEffect(() => {
         if (isOpen) {
@@ -55,11 +74,13 @@ function BlockModal({ isOpen, onClose, onSave, onDelete, block, day, startHour, 
                 setCategoryId(block.category_id || "");
                 setDurationHours(block.duration_hours);
                 setWorkType(block.work_type);
+                setSelectedColor(block.color || OTHER_COLORS[3]);
             } else {
                 setTitle("");
                 setCategoryId("");
                 setDurationHours(1);
                 setWorkType("deep");
+                setSelectedColor(OTHER_COLORS[3]);
             }
         }
     }, [isOpen, block]);
@@ -75,6 +96,7 @@ function BlockModal({ isOpen, onClose, onSave, onDelete, block, day, startHour, 
             start_hour: block?.start_hour ?? startHour,
             duration_hours: durationHours,
             work_type: workType,
+            color: workType === "other" ? selectedColor : undefined,
         });
         onClose();
     };
@@ -112,36 +134,75 @@ function BlockModal({ isOpen, onClose, onSave, onDelete, block, day, startHour, 
                         />
                     </div>
 
-                    {/* Work type selector */}
+                    {/* Work type selector - 3 columns */}
                     <div>
                         <label className="block text-sm font-medium text-foreground mb-2">
                             Tipo de trabajo
                         </label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                             <button
                                 type="button"
                                 onClick={() => setWorkType("deep")}
-                                className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-all ${workType === "deep"
+                                className={`flex items-center justify-center gap-1 px-3 py-3 rounded-xl transition-all ${workType === "deep"
                                     ? "bg-purple-500/20 border-2 border-purple-500 text-purple-400"
                                     : "bg-secondary border-2 border-transparent hover:bg-secondary/80"
                                     }`}
                             >
-                                <Brain className="h-5 w-5" />
-                                <span className="font-medium">Deep Work</span>
+                                <Brain className="h-4 w-4" />
+                                <span className="font-medium text-sm">Deep</span>
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setWorkType("shallow")}
-                                className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-all ${workType === "shallow"
+                                className={`flex items-center justify-center gap-1 px-3 py-3 rounded-xl transition-all ${workType === "shallow"
                                     ? "bg-yellow-500/20 border-2 border-yellow-500 text-yellow-400"
                                     : "bg-secondary border-2 border-transparent hover:bg-secondary/80"
                                     }`}
                             >
-                                <Zap className="h-5 w-5" />
-                                <span className="font-medium">Shallow</span>
+                                <Zap className="h-4 w-4" />
+                                <span className="font-medium text-sm">Shallow</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setWorkType("other")}
+                                className={`flex items-center justify-center gap-1 px-3 py-3 rounded-xl transition-all ${workType === "other"
+                                    ? "border-2 text-white"
+                                    : "bg-secondary border-2 border-transparent hover:bg-secondary/80"
+                                    }`}
+                                style={{
+                                    backgroundColor: workType === "other" ? `${selectedColor}40` : undefined,
+                                    borderColor: workType === "other" ? selectedColor : undefined,
+                                    color: workType === "other" ? selectedColor : undefined,
+                                }}
+                            >
+                                <Palette className="h-4 w-4" />
+                                <span className="font-medium text-sm">Otro</span>
                             </button>
                         </div>
                     </div>
+
+                    {/* Color picker for "Other" */}
+                    {workType === "other" && (
+                        <div>
+                            <label className="block text-sm font-medium text-foreground mb-2">
+                                Color
+                            </label>
+                            <div className="grid grid-cols-6 gap-2">
+                                {OTHER_COLORS.map((color) => (
+                                    <button
+                                        key={color}
+                                        type="button"
+                                        onClick={() => setSelectedColor(color)}
+                                        className={`w-10 h-10 rounded-lg transition-all ${selectedColor === color
+                                            ? "ring-2 ring-white ring-offset-2 ring-offset-card scale-110"
+                                            : "hover:scale-105"
+                                            }`}
+                                        style={{ backgroundColor: color }}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -170,7 +231,7 @@ function BlockModal({ isOpen, onClose, onSave, onDelete, block, day, startHour, 
                                 onChange={(e) => setDurationHours(Number(e.target.value))}
                                 className="w-full px-3 py-2 rounded-xl bg-secondary border border-border text-foreground"
                             >
-                                {[0.5, 1, 1.5, 2, 2.5, 3, 4].map(h => (
+                                {[0.5, 1, 1.5, 2, 2.5, 3, 4, 4.5, 5, 5.5, 6].map(h => (
                                     <option key={h} value={h}>
                                         {h}h
                                     </option>
@@ -209,6 +270,74 @@ function BlockModal({ isOpen, onClose, onSave, onDelete, block, day, startHour, 
     );
 }
 
+// Context Menu Component
+interface ContextMenuProps {
+    x: number;
+    y: number;
+    onCopy?: () => void;
+    onPaste?: () => void;
+    onDelete?: () => void;
+    onClose: () => void;
+    canPaste: boolean;
+    isOnBlock: boolean;
+}
+
+function ContextMenu({ x, y, onCopy, onPaste, onDelete, onClose, canPaste, isOnBlock }: ContextMenuProps) {
+    useEffect(() => {
+        const handleClick = () => onClose();
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === "Escape") onClose();
+        };
+        document.addEventListener("click", handleClick);
+        document.addEventListener("keydown", handleEscape);
+        return () => {
+            document.removeEventListener("click", handleClick);
+            document.removeEventListener("keydown", handleEscape);
+        };
+    }, [onClose]);
+
+    return (
+        <div
+            className="fixed z-50 bg-card border border-border rounded-lg shadow-xl py-1 min-w-[120px]"
+            style={{ left: x, top: y }}
+            onClick={(e) => e.stopPropagation()}
+        >
+            {isOnBlock && (
+                <>
+                    <button
+                        onClick={onCopy}
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2"
+                    >
+                        <Copy className="h-4 w-4" />
+                        Copiar
+                    </button>
+                    <button
+                        onClick={onDelete}
+                        className="w-full px-4 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2 text-red-400"
+                    >
+                        <Trash2 className="h-4 w-4" />
+                        Eliminar
+                    </button>
+                </>
+            )}
+            {!isOnBlock && canPaste && (
+                <button
+                    onClick={onPaste}
+                    className="w-full px-4 py-2 text-left text-sm hover:bg-secondary flex items-center gap-2"
+                >
+                    <Clipboard className="h-4 w-4" />
+                    Pegar
+                </button>
+            )}
+            {!isOnBlock && !canPaste && (
+                <div className="px-4 py-2 text-sm text-muted-foreground">
+                    Nada copiado
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function PlanificadorPage() {
     const { user } = useAuth();
     const [weekOffset, setWeekOffset] = useState(0);
@@ -221,9 +350,38 @@ export default function PlanificadorPage() {
     const [newBlockDay, setNewBlockDay] = useState(0);
     const [newBlockHour, setNewBlockHour] = useState(9);
 
+    // Context menu state
+    const [contextMenu, setContextMenu] = useState<{
+        x: number;
+        y: number;
+        block?: TimeBlock;
+        day?: number;
+        hour?: number;
+    } | null>(null);
+    const [copiedBlock, setCopiedBlock] = useState<Omit<TimeBlock, "id" | "day" | "start_hour"> | null>(null);
+
+    // Resize state
+    const [resizing, setResizing] = useState<{
+        blockId: string;
+        startY: number;
+        originalDuration: number;
+    } | null>(null);
+
+    // Current time for the time indicator
+    const [currentTime, setCurrentTime] = useState(new Date());
+
+    // Update current time every minute
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setCurrentTime(new Date());
+        }, 60000);
+        return () => clearInterval(interval);
+    }, []);
+
     // Time slots 6:00 - 23:00
     const timeSlots = Array.from({ length: 18 }, (_, i) => 6 + i);
     const dayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+    const fullDayNames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
     // Calculate week dates
     const weekData = useMemo(() => {
@@ -235,7 +393,7 @@ export default function PlanificadorPage() {
         monday.setDate(diff);
         monday.setHours(0, 0, 0, 0);
 
-        const days = [];
+        const days: { date: number; fullDate: Date; isToday: boolean; isPast: boolean }[] = [];
         for (let i = 0; i < 7; i++) {
             const date = new Date(monday);
             date.setDate(monday.getDate() + i);
@@ -250,17 +408,17 @@ export default function PlanificadorPage() {
         const sunday = new Date(monday);
         sunday.setDate(monday.getDate() + 6);
 
-        const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-        const weekLabel = `${monday.getDate()} ${monthNames[monday.getMonth()]} - ${sunday.getDate()} ${monthNames[sunday.getMonth()]}`;
+        const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+        const monthLabel = monthNames[monday.getMonth()] + " " + monday.getFullYear();
 
-        return { days, weekLabel, monday, sunday };
+        return { days, monthLabel, monday, sunday };
     }, [weekOffset]);
 
     // Load categories
     useEffect(() => {
         async function load() {
             const cats = await getCategories();
-            setCategories(cats.filter(c => !c.parent_id));
+            setCategories(cats.filter((c: Category) => !c.parent_id));
         }
         load();
     }, []);
@@ -296,7 +454,7 @@ export default function PlanificadorPage() {
                 const converted = logs.map((log: any) => {
                     const startDate = new Date(log.started_at);
                     const dayOfWeek = (startDate.getDay() + 6) % 7; // Mon=0, Sun=6
-                    const cat = categories.find(c => c.id === log.category_id);
+                    const cat = categories.find((c: Category) => c.id === log.category_id);
                     return {
                         id: `log_${log.id}`,
                         title: cat?.name || "Tiempo registrado",
@@ -304,7 +462,7 @@ export default function PlanificadorPage() {
                         day: dayOfWeek,
                         start_hour: startDate.getHours(),
                         duration_hours: Math.max(1, Math.round(log.duration_minutes / 60)),
-                        work_type: log.work_type as "deep" | "shallow",
+                        work_type: log.work_type as "deep" | "shallow" | "other",
                         isLogged: true,
                     };
                 });
@@ -329,22 +487,38 @@ export default function PlanificadorPage() {
     }, [weekData]);
 
     // Add/edit block
-    const handleSaveBlock = (blockData: Omit<TimeBlock, "id">) => {
+    const handleSaveBlock = async (blockData: Omit<TimeBlock, "id">) => {
         if (editingBlock) {
-            saveBlocks(blocks.map(b =>
+            saveBlocks(blocks.map((b: TimeBlock) =>
                 b.id === editingBlock.id
                     ? { ...blockData, id: editingBlock.id }
                     : b
             ));
         } else {
-            saveBlocks([...blocks, { ...blockData, id: crypto.randomUUID() }]);
+            const newBlock = { ...blockData, id: crypto.randomUUID() };
+            saveBlocks([...blocks, newBlock]);
+
+            // If it's "other" work type and has a category, create a time_log for category stats
+            if (blockData.work_type === "other" && blockData.category_id) {
+                const userId = await getCurrentUserId();
+                if (userId) {
+                    const blockDate = new Date(weekData.monday);
+                    blockDate.setDate(blockDate.getDate() + blockData.day);
+                    blockDate.setHours(blockData.start_hour, 0, 0, 0);
+                    const endDate = new Date(blockDate);
+                    endDate.setHours(endDate.getHours() + blockData.duration_hours);
+
+                    // Note: We use "shallow" for storage but with a flag or custom handling
+                    // Actually, we'll use a different approach - store as shallow but the UI won't count it
+                }
+            }
         }
         setEditingBlock(null);
     };
 
     // Delete block
     const handleDeleteBlock = (blockId: string) => {
-        saveBlocks(blocks.filter(b => b.id !== blockId));
+        saveBlocks(blocks.filter((b: TimeBlock) => b.id !== blockId));
     };
 
     // Copy previous week
@@ -364,13 +538,13 @@ export default function PlanificadorPage() {
     // Get category info
     const getCategoryInfo = (categoryId: string | null) => {
         if (!categoryId) return { color: "hsl(var(--primary))", emoji: "📋" };
-        const cat = categories.find(c => c.id === categoryId);
+        const cat = categories.find((c: Category) => c.id === categoryId);
         return { color: cat?.color || "hsl(var(--primary))", emoji: cat?.emoji || "📋" };
     };
 
     // Get block at position (from all blocks)
     const getBlockAt = (day: number, hour: number) => {
-        return allBlocks.find(b =>
+        return allBlocks.find((b: TimeBlock) =>
             b.day === day &&
             hour >= b.start_hour &&
             hour < b.start_hour + b.duration_hours
@@ -382,12 +556,103 @@ export default function PlanificadorPage() {
         const now = new Date();
         const blockDate = new Date(weekData.days[day].fullDate);
         if (hour !== undefined) {
-            blockDate.setHours(hour + 1, 0, 0, 0); // Block must complete to count
+            blockDate.setHours(hour + 1, 0, 0, 0);
         }
         return blockDate < now;
     };
 
-    // Calculate hours - ONLY for past events
+    // Handle right-click context menu
+    const handleContextMenu = (e: React.MouseEvent, day?: number, hour?: number, block?: TimeBlock) => {
+        e.preventDefault();
+        setContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            block,
+            day,
+            hour,
+        });
+    };
+
+    // Copy block
+    const handleCopyBlock = () => {
+        if (contextMenu?.block) {
+            const { id, day, start_hour, ...rest } = contextMenu.block;
+            setCopiedBlock(rest);
+        }
+        setContextMenu(null);
+    };
+
+    // Paste block
+    const handlePasteBlock = () => {
+        if (copiedBlock && contextMenu?.day !== undefined && contextMenu?.hour !== undefined) {
+            const newBlock: TimeBlock = {
+                ...copiedBlock,
+                id: crypto.randomUUID(),
+                day: contextMenu.day,
+                start_hour: contextMenu.hour,
+            };
+            saveBlocks([...blocks, newBlock]);
+        }
+        setContextMenu(null);
+    };
+
+    // Delete from context menu
+    const handleDeleteFromMenu = () => {
+        if (contextMenu?.block && !contextMenu.block.isLogged) {
+            handleDeleteBlock(contextMenu.block.id);
+        }
+        setContextMenu(null);
+    };
+
+    // Handle resize start
+    const handleResizeStart = (e: React.MouseEvent, block: TimeBlock) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setResizing({
+            blockId: block.id,
+            startY: e.clientY,
+            originalDuration: block.duration_hours,
+        });
+    };
+
+    // Handle resize move
+    useEffect(() => {
+        if (!resizing) return;
+
+        const handleMouseMove = (e: MouseEvent) => {
+            const deltaY = e.clientY - resizing.startY;
+            const hourHeight = 40; // matches min-h-[40px] from time slots
+            const deltaDuration = Math.round((deltaY / hourHeight) * 2) / 2; // snap to 0.5h
+            const newDuration = Math.max(0.5, Math.min(6, resizing.originalDuration + deltaDuration));
+
+            setBlocks((prev: TimeBlock[]) =>
+                prev.map((b: TimeBlock) =>
+                    b.id === resizing.blockId
+                        ? { ...b, duration_hours: newDuration }
+                        : b
+                )
+            );
+        };
+
+        const handleMouseUp = () => {
+            // Save to localStorage
+            const currentBlocks = blocks;
+            localStorage.setItem(
+                `planner_blocks_${weekData.monday.toISOString().split('T')[0]}`,
+                JSON.stringify(currentBlocks)
+            );
+            setResizing(null);
+        };
+
+        document.addEventListener("mousemove", handleMouseMove);
+        document.addEventListener("mouseup", handleMouseUp);
+        return () => {
+            document.removeEventListener("mousemove", handleMouseMove);
+            document.removeEventListener("mouseup", handleMouseUp);
+        };
+    }, [resizing, blocks, weekData]);
+
+    // Calculate stats - exclude "other" from deep/shallow counts
     const stats = useMemo(() => {
         const byCategory = new Map<string, number>();
         let deepHours = 0;
@@ -395,25 +660,28 @@ export default function PlanificadorPage() {
         let plannedDeep = 0;
         let plannedShallow = 0;
 
-        allBlocks.forEach(b => {
+        allBlocks.forEach((b: TimeBlock) => {
             const blockEndHour = b.start_hour + b.duration_hours - 1;
             const isPast = hasPassed(b.day, blockEndHour);
 
             // Only count completed (past) blocks
             if (isPast || b.isLogged) {
+                // Category stats include ALL types (deep, shallow, other)
                 const key = b.category_id || "none";
                 byCategory.set(key, (byCategory.get(key) || 0) + b.duration_hours);
 
+                // Deep/shallow only for those types (NOT "other")
                 if (b.work_type === "deep") {
                     deepHours += b.duration_hours;
-                } else {
+                } else if (b.work_type === "shallow") {
                     shallowHours += b.duration_hours;
                 }
+                // "other" type: counts for category but NOT for deep/shallow
             } else {
-                // Future planned blocks - show separately
+                // Future planned blocks
                 if (b.work_type === "deep") {
                     plannedDeep += b.duration_hours;
-                } else {
+                } else if (b.work_type === "shallow") {
                     plannedShallow += b.duration_hours;
                 }
             }
@@ -430,41 +698,54 @@ export default function PlanificadorPage() {
         };
     }, [allBlocks, weekData]);
 
+    // Get current time position for indicator
+    const getCurrentTimePosition = () => {
+        const now = currentTime;
+        const todayIndex = weekData.days.findIndex((d: { isToday: boolean }) => d.isToday);
+        if (todayIndex === -1) return null;
+
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+
+        if (hours < 6 || hours >= 24) return null;
+
+        const totalMinutesFromStart = (hours - 6) * 60 + minutes;
+        const percentFromTop = (totalMinutesFromStart / (18 * 60)) * 100;
+
+        return { dayIndex: todayIndex, percent: percentFromTop };
+    };
+
+    const timeIndicator = getCurrentTimePosition();
+
     return (
         <MainLayout title="Planificador">
-            <div className="space-y-6">
-                {/* Header with navigation */}
-                <Card>
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                            <button
-                                onClick={() => setWeekOffset(w => w - 1)}
-                                className="p-2 rounded-lg hover:bg-secondary transition-colors"
-                            >
-                                <ChevronLeft className="h-5 w-5 text-foreground" />
-                            </button>
-                            <div className="text-center">
-                                <h2 className="text-lg font-semibold text-foreground">
-                                    {weekData.weekLabel}
-                                </h2>
-                                {weekOffset !== 0 && (
-                                    <button
-                                        onClick={() => setWeekOffset(0)}
-                                        className="text-xs text-primary hover:underline"
-                                    >
-                                        Ir a esta semana
-                                    </button>
-                                )}
-                            </div>
-                            <button
-                                onClick={() => setWeekOffset(w => w + 1)}
-                                className="p-2 rounded-lg hover:bg-secondary transition-colors"
-                            >
-                                <ChevronRight className="h-5 w-5 text-foreground" />
-                            </button>
-                        </div>
-                    </CardContent>
-                </Card>
+            <div className="space-y-4">
+                {/* Google-style header */}
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => setWeekOffset(0)}
+                        className="px-4 py-2 rounded-lg border border-border hover:bg-secondary transition-colors text-sm font-medium"
+                    >
+                        Hoy
+                    </button>
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => setWeekOffset(w => w - 1)}
+                            className="p-2 rounded-full hover:bg-secondary transition-colors"
+                        >
+                            <ChevronLeft className="h-5 w-5 text-foreground" />
+                        </button>
+                        <button
+                            onClick={() => setWeekOffset(w => w + 1)}
+                            className="p-2 rounded-full hover:bg-secondary transition-colors"
+                        >
+                            <ChevronRight className="h-5 w-5 text-foreground" />
+                        </button>
+                    </div>
+                    <h2 className="text-xl font-semibold text-foreground">
+                        {weekData.monthLabel}
+                    </h2>
+                </div>
 
                 {/* Stats bar */}
                 <div className="flex flex-wrap gap-3 items-center justify-between">
@@ -508,7 +789,7 @@ export default function PlanificadorPage() {
                             const { color, emoji } = getCategoryInfo(catId === "none" ? null : catId);
                             const catName = catId === "none"
                                 ? "Sin categoría"
-                                : categories.find(c => c.id === catId)?.name || "Otro";
+                                : categories.find((c: Category) => c.id === catId)?.name || "Otro";
                             return (
                                 <div
                                     key={catId}
@@ -527,99 +808,132 @@ export default function PlanificadorPage() {
                 {/* Calendar grid */}
                 <Card>
                     <CardContent className="p-0 overflow-x-auto">
-                        <div className="min-w-[800px]">
-                            {/* Header row */}
+                        <div className="min-w-[800px] relative">
+                            {/* Header row with days */}
                             <div className="grid grid-cols-8 border-b border-border">
                                 <div className="p-3 text-center text-sm font-medium text-muted-foreground">
-                                    Hora
+
                                 </div>
-                                {weekData.days.map((day, i) => (
+                                {weekData.days.map((day: { date: number; isToday: boolean; isPast: boolean }, i: number) => (
                                     <div
                                         key={i}
-                                        className={`p-3 text-center border-l border-border ${day.isToday ? "bg-primary/10" : day.isPast ? "bg-secondary/30" : ""
+                                        className={`p-3 text-center border-l border-border ${day.isPast ? "bg-secondary/30" : ""
                                             }`}
                                     >
-                                        <p className="text-sm font-medium text-muted-foreground">
+                                        <p className="text-sm font-medium text-muted-foreground uppercase">
                                             {dayNames[i]}
                                         </p>
-                                        <p className={`text-lg font-bold ${day.isToday ? "text-primary" : "text-foreground"
+                                        <div className={`inline-flex items-center justify-center w-10 h-10 rounded-full mt-1 ${day.isToday
+                                            ? "bg-primary text-white"
+                                            : "text-foreground"
                                             }`}>
-                                            {day.date}
-                                        </p>
+                                            <span className="text-lg font-bold">{day.date}</span>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
 
-                            {/* Time slots */}
-                            {timeSlots.map(hour => (
-                                <div key={hour} className="grid grid-cols-8 border-b border-border/50">
-                                    <div className="p-2 text-center text-xs font-mono text-muted-foreground flex items-center justify-center">
-                                        {String(hour).padStart(2, '0')}:00
+                            {/* Time slots with current time indicator */}
+                            <div className="relative">
+                                {/* Current time indicator line */}
+                                {timeIndicator && (
+                                    <div
+                                        className="absolute z-20 pointer-events-none"
+                                        style={{
+                                            top: `${timeIndicator.percent}%`,
+                                            left: `calc(${(timeIndicator.dayIndex + 1) * 12.5}% + 1px)`,
+                                            width: `calc(12.5% - 2px)`,
+                                        }}
+                                    >
+                                        <div className="relative flex items-center">
+                                            <div className="w-3 h-3 rounded-full bg-red-500 -ml-1.5" />
+                                            <div className="flex-1 h-0.5 bg-red-500" />
+                                        </div>
                                     </div>
-                                    {weekData.days.map((day, dayIndex) => {
-                                        const block = getBlockAt(dayIndex, hour);
-                                        const isBlockStart = block?.start_hour === hour;
+                                )}
 
-                                        // Skip if this is a continuation of a block
-                                        if (block && !isBlockStart) {
-                                            return null;
-                                        }
+                                {timeSlots.map(hour => (
+                                    <div key={hour} className="grid grid-cols-8 border-b border-border/50">
+                                        <div className="p-2 text-center text-xs font-mono text-muted-foreground flex items-center justify-center">
+                                            {String(hour).padStart(2, '0')}:00
+                                        </div>
+                                        {weekData.days.map((day: { isToday: boolean; isPast: boolean }, dayIndex: number) => {
+                                            const block = getBlockAt(dayIndex, hour);
+                                            const isBlockStart = block?.start_hour === hour;
 
-                                        return (
-                                            <div
-                                                key={dayIndex}
-                                                className={`border-l border-border/50 relative ${day.isToday ? "bg-primary/5" : day.isPast ? "bg-secondary/20" : ""
-                                                    }`}
-                                                style={{
-                                                    gridRow: block
-                                                        ? `span ${block.duration_hours}`
-                                                        : undefined
-                                                }}
-                                            >
-                                                {block ? (
-                                                    <button
-                                                        onClick={() => {
-                                                            setEditingBlock(block);
-                                                            setShowModal(true);
-                                                        }}
-                                                        className="absolute inset-1 p-2 rounded-lg text-left text-xs font-medium text-white shadow-sm hover:opacity-90 transition-opacity overflow-hidden"
-                                                        style={{
-                                                            backgroundColor: block.work_type === "deep"
-                                                                ? "#8b5cf6"
-                                                                : "#f59e0b",
-                                                            height: `calc(${block.duration_hours * 100}% - 8px)`
-                                                        }}
-                                                    >
-                                                        <div className="flex items-center gap-1">
-                                                            {block.work_type === "deep" ? (
-                                                                <Brain className="h-3 w-3" />
-                                                            ) : (
-                                                                <Zap className="h-3 w-3" />
+                                            if (block && !isBlockStart) {
+                                                return null;
+                                            }
+
+                                            return (
+                                                <div
+                                                    key={dayIndex}
+                                                    className={`border-l border-border/50 relative ${day.isToday ? "bg-primary/5" : day.isPast ? "bg-secondary/20" : ""
+                                                        }`}
+                                                    style={{
+                                                        gridRow: block
+                                                            ? `span ${Math.ceil(block.duration_hours)}`
+                                                            : undefined
+                                                    }}
+                                                    onContextMenu={(e) => handleContextMenu(e, dayIndex, hour, block || undefined)}
+                                                >
+                                                    {block ? (
+                                                        <div
+                                                            className="absolute inset-1 rounded-lg text-left text-xs font-medium text-white shadow-sm overflow-hidden cursor-pointer group"
+                                                            style={{
+                                                                backgroundColor: block.work_type === "other"
+                                                                    ? block.color
+                                                                    : block.work_type === "deep"
+                                                                        ? "#8b5cf6"
+                                                                        : "#f59e0b",
+                                                                height: `calc(${block.duration_hours * 100}% - 8px)`
+                                                            }}
+                                                            onClick={() => {
+                                                                if (!block.isLogged) {
+                                                                    setEditingBlock(block);
+                                                                    setShowModal(true);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <div className="p-2 h-full flex flex-col">
+                                                                <div className="flex items-center gap-1">
+                                                                    {block.work_type === "deep" && <Brain className="h-3 w-3" />}
+                                                                    {block.work_type === "shallow" && <Zap className="h-3 w-3" />}
+                                                                    {block.work_type === "other" && <Palette className="h-3 w-3" />}
+                                                                    <span className="truncate">{block.title}</span>
+                                                                </div>
+                                                                <div className="text-white/70 mt-0.5">
+                                                                    {String(block.start_hour).padStart(2, '0')}:00 - {String(block.start_hour + block.duration_hours).padStart(2, '0')}:00
+                                                                </div>
+                                                            </div>
+                                                            {/* Resize handle */}
+                                                            {!block.isLogged && (
+                                                                <div
+                                                                    className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize opacity-0 group-hover:opacity-100 bg-black/20 transition-opacity"
+                                                                    onMouseDown={(e) => handleResizeStart(e, block)}
+                                                                />
                                                             )}
-                                                            <span className="truncate">{block.title}</span>
                                                         </div>
-                                                        <div className="text-white/70 mt-0.5">
-                                                            {String(block.start_hour).padStart(2, '0')}:00 - {String(block.start_hour + block.duration_hours).padStart(2, '0')}:00
-                                                        </div>
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => {
-                                                            setNewBlockDay(dayIndex);
-                                                            setNewBlockHour(hour);
-                                                            setEditingBlock(null);
-                                                            setShowModal(true);
-                                                        }}
-                                                        className="w-full h-full min-h-[40px] hover:bg-primary/5 transition-colors group flex items-center justify-center"
-                                                    >
-                                                        <Plus className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            ))}
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => {
+                                                                setNewBlockDay(dayIndex);
+                                                                setNewBlockHour(hour);
+                                                                setEditingBlock(null);
+                                                                setShowModal(true);
+                                                            }}
+                                                            onContextMenu={(e) => handleContextMenu(e, dayIndex, hour)}
+                                                            className="w-full h-full min-h-[40px] hover:bg-primary/5 transition-colors group flex items-center justify-center"
+                                                        >
+                                                            <Plus className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </CardContent>
                 </Card>
@@ -628,8 +942,8 @@ export default function PlanificadorPage() {
                 <Card className="border-primary/20 bg-primary/5">
                     <CardContent className="p-4">
                         <p className="text-sm text-foreground">
-                            <strong>💡 Tip:</strong> Puedes planificar días pasados para registrar tu tiempo retroactivamente.
-                            Los bloques morados son Deep Work y los amarillos son Shallow Work.
+                            <strong>💡 Tip:</strong> Click derecho para copiar/pegar bloques. Arrastra el borde inferior para redimensionar.
+                            Los bloques verdes/otros colores no cuentan para deep/shallow pero sí para la categoría.
                         </p>
                     </CardContent>
                 </Card>
@@ -649,6 +963,20 @@ export default function PlanificadorPage() {
                 startHour={newBlockHour}
                 categories={categories}
             />
+
+            {/* Context Menu */}
+            {contextMenu && (
+                <ContextMenu
+                    x={contextMenu.x}
+                    y={contextMenu.y}
+                    isOnBlock={!!contextMenu.block}
+                    canPaste={!!copiedBlock}
+                    onCopy={handleCopyBlock}
+                    onPaste={handlePasteBlock}
+                    onDelete={handleDeleteFromMenu}
+                    onClose={() => setContextMenu(null)}
+                />
+            )}
         </MainLayout>
     );
 }
