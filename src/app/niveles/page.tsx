@@ -262,8 +262,8 @@ export default function NivelesPage() {
                                         <div
                                             key={achievement.id}
                                             className={`p-4 rounded-xl border transition-all ${isUnlocked
-                                                    ? "bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border-yellow-500/50"
-                                                    : "bg-secondary/50 border-border opacity-60"
+                                                ? "bg-gradient-to-br from-yellow-500/20 to-orange-500/20 border-yellow-500/50"
+                                                : "bg-secondary/50 border-border opacity-60"
                                                 }`}
                                         >
                                             <div className="flex items-start gap-3">

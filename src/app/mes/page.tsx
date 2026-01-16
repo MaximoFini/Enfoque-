@@ -5,7 +5,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { useAuth } from "@/context/AuthContext";
 import { getCategories, getCurrentUserId } from "@/lib/supabase/services";
-import type { Category } from "@/lib/supabase/types";
+import type { Category, TimeLog } from "@/lib/supabase/types";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import {
     ChevronLeft,
@@ -145,17 +145,17 @@ export default function MesPage() {
                 .select("*")
                 .eq("user_id", userId)
                 .gte("started_at", monthData.firstDay.toISOString())
-                .lte("started_at", monthData.lastDay.toISOString());
+                .lte("started_at", monthData.lastDay.toISOString()) as { data: TimeLog[] | null };
 
             if (logs) {
                 // Calculate stats
                 const totalMinutes = logs.reduce((sum, l) => sum + l.duration_minutes, 0);
-                const uniqueDays = new Set(logs.map(l => l.logged_at.split('T')[0])).size;
+                const uniqueDays = new Set(logs.map(l => l.started_at.split('T')[0])).size;
 
                 // Weekly data
                 const weeklyMap = new Map<number, number>();
                 logs.forEach(log => {
-                    const logDate = new Date(log.logged_at);
+                    const logDate = new Date(log.started_at);
                     const weekNum = Math.ceil(logDate.getDate() / 7);
                     weeklyMap.set(weekNum, (weeklyMap.get(weekNum) || 0) + log.duration_minutes / 60);
                 });
@@ -175,10 +175,10 @@ export default function MesPage() {
 
                 const categoryData = cats
                     .filter(c => !c.parent_id && categoryMap.has(c.id))
-                    .map(cat => ({
+                    .map((cat, index) => ({
                         name: cat.name,
                         hours: Math.round((categoryMap.get(cat.id) || 0) * 10) / 10,
-                        color: cat.color,
+                        color: cat.color || COLORS[index % COLORS.length],
                     }))
                     .sort((a, b) => b.hours - a.hours);
 
@@ -379,7 +379,7 @@ export default function MesPage() {
                                                 dataKey="hours"
                                                 nameKey="name"
                                                 label={({ name, percent }) =>
-                                                    `${name} ${(percent * 100).toFixed(0)}%`
+                                                    `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
                                                 }
                                             >
                                                 {monthStats.categoryData.map((entry, index) => (
@@ -396,7 +396,7 @@ export default function MesPage() {
                                                     borderRadius: '8px',
                                                     color: 'hsl(var(--foreground))'
                                                 }}
-                                                formatter={(value: number) => [`${value.toFixed(1)}h`, 'Horas']}
+                                                formatter={(value) => [`${Number(value).toFixed(1)}h`, 'Horas']}
                                             />
                                         </RechartsPieChart>
                                     </ResponsiveContainer>
