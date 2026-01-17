@@ -59,13 +59,22 @@ export default function RetrospectivaPage() {
     const now = new Date();
     const currentHour = now.getHours();
     const currentDay = now.getDay(); // 0 = Sunday
-    const todayStr = now.toISOString().split('T')[0];
+
+    // Helper to get local date string YYYY-MM-DD
+    const getLocalYYYYMMDD = (d: Date) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const todayStr = getLocalYYYYMMDD(now);
 
     // Get current week's Monday
     const monday = new Date(now);
     const diff = now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1);
     monday.setDate(diff);
-    const weekStartStr = monday.toISOString().split('T')[0];
+    const weekStartStr = getLocalYYYYMMDD(monday);
 
     // Form state for daily log
     const [dailyForm, setDailyForm] = useState({

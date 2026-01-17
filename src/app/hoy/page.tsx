@@ -5,18 +5,18 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { TimerDisplay } from "@/components/timer/TimerDisplay";
 import { PomodoroTimer } from "@/components/timer/PomodoroTimer";
-import { QuickLogModal, type QuickLogData } from "@/components/timer/QuickLogModal";
+import { TimeBlockModal, type TimeBlockData } from "@/components/timer/TimeBlockModal";
 import { WeeklyGoalsCard } from "@/components/goals/WeeklyGoalsCard";
-import { TaskList } from "@/components/tasks/TaskList";
 import { useWeeklyProgress } from "@/hooks/useWeeklyProgress";
 import { useTasks } from "@/hooks/useTasks";
-import { createTimeLog, getCurrentUserId, getTimeLogsForToday, getCategories } from "@/lib/supabase/services";
-import { CheckCircle2, Clock, Plus, Brain, Zap, ListTodo } from "lucide-react";
-import Link from "next/link";
+import { createTimeLogExtended, getCurrentUserId, getTimeLogsForToday, getCategories, isOtherWorkType } from "@/lib/supabase/services";
+import type { Category } from "@/lib/supabase/types";
+import { CheckCircle2, Clock, Plus, Brain, Zap } from "lucide-react";
 
 export default function HoyPage() {
-    const [showQuickLog, setShowQuickLog] = useState(false);
+    const [showTimeBlockModal, setShowTimeBlockModal] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
+    const [categories, setCategories] = useState<Category[]>([]);
     const [facultadCategoryId, setFacultadCategoryId] = useState<string | null>(null);
     const { todayProgress, totalTodayHours, refresh: refreshProgress } = useWeeklyProgress();
 
@@ -39,12 +39,17 @@ export default function HoyPage() {
         shallowHours: 0,
     });
 
-    // Load Facultad category ID and today's stats
+    // Load categories, Facultad category ID, and today's stats
     useEffect(() => {
         async function loadData() {
-            // Get Facultad category ID
+            // Get all categories
             const cats = await getCategories();
-            const facultad = cats.find(c => c.name.toLowerCase() === "facultad");
+            // Filter to only parent categories (no parent_id)
+            const parentCats = cats.filter((c: Category) => !c.parent_id);
+            setCategories(parentCats);
+
+            // Get Facultad category ID
+            const facultad = cats.find((c: Category) => c.name.toLowerCase() === "facultad");
             if (facultad) {
                 setFacultadCategoryId(facultad.id);
             }
@@ -54,8 +59,10 @@ export default function HoyPage() {
             if (!userId) return;
 
             const logs = await getTimeLogsForToday(userId);
-            const deepMinutes = logs.filter(l => l.work_type === "deep").reduce((sum, l) => sum + l.duration_minutes, 0);
-            const shallowMinutes = logs.filter(l => l.work_type === "shallow").reduce((sum, l) => sum + l.duration_minutes, 0);
+            // Filter out "other" work type entries (marked with __OTHER__ prefix in notes)
+            const countableLogs = logs.filter(l => !isOtherWorkType(l.notes));
+            const deepMinutes = countableLogs.filter(l => l.work_type === "deep").reduce((sum, l) => sum + l.duration_minutes, 0);
+            const shallowMinutes = countableLogs.filter(l => l.work_type === "shallow").reduce((sum, l) => sum + l.duration_minutes, 0);
 
             setTodayStats({
                 focusedHours: (deepMinutes + shallowMinutes) / 60,
@@ -67,37 +74,41 @@ export default function HoyPage() {
         loadData();
     }, []);
 
-    const handleQuickLogSave = async (data: QuickLogData) => {
+    const handleTimeBlockSave = async (data: TimeBlockData) => {
         setIsSaving(true);
-        const totalMinutes = data.hours * 60 + data.minutes;
+        const durationMinutes = Math.round(data.durationHours * 60);
 
         try {
             const userId = await getCurrentUserId();
 
             if (userId) {
                 const now = new Date();
-                const startedAt = new Date(now.getTime() - totalMinutes * 60 * 1000);
+                const startedAt = new Date(now.getTime() - durationMinutes * 60 * 1000);
 
-                await createTimeLog({
+                await createTimeLogExtended({
                     userId,
-                    categoryId: data.categoryId,
-                    subcategoryId: data.subcategoryId,
-                    durationMinutes: totalMinutes,
+                    title: data.title,
+                    categoryId: data.categoryId || undefined,
+                    durationMinutes,
                     workType: data.workType,
+                    color: data.color,
                     startedAt,
                     endedAt: now,
                 });
 
                 refreshProgress();
-            }
 
-            setTodayStats(prev => ({
-                focusedHours: prev.focusedHours + totalMinutes / 60,
-                deepHours: data.workType === "deep" ? prev.deepHours + totalMinutes / 60 : prev.deepHours,
-                shallowHours: data.workType === "shallow" ? prev.shallowHours + totalMinutes / 60 : prev.shallowHours,
-            }));
+                // Only update stats for deep/shallow work types
+                if (data.workType !== "other") {
+                    setTodayStats(prev => ({
+                        focusedHours: prev.focusedHours + durationMinutes / 60,
+                        deepHours: data.workType === "deep" ? prev.deepHours + durationMinutes / 60 : prev.deepHours,
+                        shallowHours: data.workType === "shallow" ? prev.shallowHours + durationMinutes / 60 : prev.shallowHours,
+                    }));
+                }
+            }
         } catch (error) {
-            console.error("Error saving time log:", error);
+            console.error("Error saving time block:", error);
         } finally {
             setIsSaving(false);
         }
@@ -111,8 +122,10 @@ export default function HoyPage() {
             if (!userId) return;
 
             const logs = await getTimeLogsForToday(userId);
-            const deepMinutes = logs.filter(l => l.work_type === "deep").reduce((sum, l) => sum + l.duration_minutes, 0);
-            const shallowMinutes = logs.filter(l => l.work_type === "shallow").reduce((sum, l) => sum + l.duration_minutes, 0);
+            // Filter out "other" work type entries
+            const countableLogs = logs.filter(l => !isOtherWorkType(l.notes));
+            const deepMinutes = countableLogs.filter(l => l.work_type === "deep").reduce((sum, l) => sum + l.duration_minutes, 0);
+            const shallowMinutes = countableLogs.filter(l => l.work_type === "shallow").reduce((sum, l) => sum + l.duration_minutes, 0);
 
             setTodayStats({
                 focusedHours: (deepMinutes + shallowMinutes) / 60,
@@ -136,10 +149,10 @@ export default function HoyPage() {
         const now = new Date();
         const startedAt = new Date(now.getTime() - minutes * 60 * 1000);
 
-        await createTimeLog({
+        await createTimeLogExtended({
             userId,
+            title: "Pomodoro",
             categoryId: facultadCategoryId,
-            subcategoryId: undefined,
             durationMinutes: minutes,
             workType: "deep", // Pomodoro is always deep work
             startedAt,
@@ -189,7 +202,7 @@ export default function HoyPage() {
                 {/* Quick actions */}
                 <div className="flex flex-wrap gap-3">
                     <button
-                        onClick={() => setShowQuickLog(true)}
+                        onClick={() => setShowTimeBlockModal(true)}
                         disabled={isSaving}
                         className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-secondary hover:bg-accent transition-colors disabled:opacity-50"
                     >
@@ -336,11 +349,12 @@ export default function HoyPage() {
                 </div>
             </div>
 
-            {/* Quick Log Modal */}
-            <QuickLogModal
-                isOpen={showQuickLog}
-                onClose={() => setShowQuickLog(false)}
-                onSave={handleQuickLogSave}
+            {/* Time Block Modal */}
+            <TimeBlockModal
+                isOpen={showTimeBlockModal}
+                onClose={() => setShowTimeBlockModal(false)}
+                onSave={handleTimeBlockSave}
+                categories={categories}
             />
         </MainLayout>
     );

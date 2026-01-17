@@ -6,6 +6,7 @@ import {
     getWeeklyGoals,
     getDailyLogsForWeek,
     getTimeLogsForToday,
+    getTimeLogsForWeek,
     getCurrentUserId,
     getCategories as getSupabaseCategories,
 } from "@/lib/supabase/services";

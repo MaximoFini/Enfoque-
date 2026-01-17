@@ -15,7 +15,6 @@ import {
     Zap,
     Target,
     CheckCircle2,
-    Flame,
     TrendingUp
 } from "lucide-react";
 
@@ -95,8 +94,6 @@ export default function SemanaPage() {
         ? Math.min(100, Math.round((totalWeeklyHours / totalWeeklyTarget) * 100))
         : 0;
 
-    // Streak (placeholder - would need historical data)
-    const currentStreak = 5; // TODO: Calculate from historical data
 
     return (
         <MainLayout title="Semana">
@@ -137,8 +134,8 @@ export default function SemanaPage() {
                                 <button
                                     key={day.name + day.date}
                                     className={`p-3 rounded-xl text-center transition-all ${day.isToday
-                                            ? "gradient-primary text-white"
-                                            : "hover:bg-secondary"
+                                        ? "gradient-primary text-white"
+                                        : "hover:bg-secondary"
                                         }`}
                                 >
                                     <p className={`text-xs ${day.isToday ? "text-white/80" : "text-muted-foreground"}`}>
@@ -157,7 +154,7 @@ export default function SemanaPage() {
                 <WeeklyGoalsCard title="🎯 Metas de la Semana" />
 
                 {/* Stats grid */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                     {/* Total Hours */}
                     <Card hover>
                         <CardContent className="p-4">
@@ -212,23 +209,6 @@ export default function SemanaPage() {
                                         {weekStats.shallowHours.toFixed(1)}h
                                     </p>
                                     <p className="text-xs text-muted-foreground">Shallow Work</p>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Streak */}
-                    <Card hover>
-                        <CardContent className="p-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-xl bg-orange-500/10 flex items-center justify-center">
-                                    <Flame className="h-6 w-6 text-orange-500" />
-                                </div>
-                                <div>
-                                    <p className="text-2xl font-bold text-foreground">
-                                        {currentStreak} días
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">Racha activa</p>
                                 </div>
                             </div>
                         </CardContent>

@@ -4,8 +4,7 @@ import * as React from "react";
 import { Play, Pause, X, RotateCcw, Brain, Zap } from "lucide-react";
 import { useTimer } from "@/hooks/useTimer";
 import type { WorkType } from "@/lib/supabase/types";
-import { createTimeLog, getCurrentUserId } from "@/lib/supabase/services";
-import { CategoryModal } from "./CategoryModal";
+import { TimerCompletionModal } from "./TimerCompletionModal";
 
 interface TimerDisplayProps {
     onLogSaved?: () => void;
@@ -13,13 +12,12 @@ interface TimerDisplayProps {
 
 export function TimerDisplay({ onLogSaved }: TimerDisplayProps) {
     const { state, start, pause, resume, cancel, complete, formatTime, progress } = useTimer();
-    const [showCategoryModal, setShowCategoryModal] = React.useState(false);
-    const [isSaving, setIsSaving] = React.useState(false);
+    const [showCompletionModal, setShowCompletionModal] = React.useState(false);
 
-    // Show category modal when timer completes
+    // Show completion modal when timer completes
     React.useEffect(() => {
         if (state.isCompleted) {
-            setShowCategoryModal(true);
+            setShowCompletionModal(true);
         }
     }, [state.isCompleted]);
 
@@ -31,36 +29,14 @@ export function TimerDisplay({ onLogSaved }: TimerDisplayProps) {
         start(25, "shallow");
     };
 
-    const handleCategorySave = async (categoryId: string, subcategoryId?: string) => {
-        setIsSaving(true);
-
-        try {
-            const userId = await getCurrentUserId();
-
-            if (userId && state.startedAt) {
-                await createTimeLog({
-                    userId,
-                    categoryId,
-                    subcategoryId,
-                    durationMinutes: Math.round(state.totalTime / 60),
-                    workType: state.workType || "deep",
-                    startedAt: state.startedAt,
-                    endedAt: new Date(),
-                });
-            }
-
-            setShowCategoryModal(false);
-            complete();
-            onLogSaved?.();
-        } catch (error) {
-            console.error("Error saving time log:", error);
-        } finally {
-            setIsSaving(false);
-        }
+    const handleComplete = () => {
+        setShowCompletionModal(false);
+        complete();
+        onLogSaved?.();
     };
 
-    const handleCategoryClose = () => {
-        setShowCategoryModal(false);
+    const handleClose = () => {
+        setShowCompletionModal(false);
         complete();
     };
 
@@ -217,13 +193,14 @@ export function TimerDisplay({ onLogSaved }: TimerDisplayProps) {
                 </div>
             </div>
 
-            {/* Category selection modal */}
-            <CategoryModal
-                isOpen={showCategoryModal}
-                onClose={handleCategoryClose}
-                onSave={handleCategorySave}
-                workType={state.workType || "deep"}
-                duration={state.totalTime / 60}
+            {/* Timer completion modal */}
+            <TimerCompletionModal
+                isOpen={showCompletionModal}
+                onClose={handleClose}
+                onComplete={handleComplete}
+                timerWorkType={state.workType || "deep"}
+                durationMinutes={Math.round(state.totalTime / 60)}
+                startedAt={state.startedAt || new Date()}
             />
         </>
     );

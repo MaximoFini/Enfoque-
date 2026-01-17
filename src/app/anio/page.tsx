@@ -66,11 +66,11 @@ function ActivityHeatmap({ dailyData, year }: { dailyData: Map<string, number>; 
 
             let level = -1; // -1 = outside year
             if (isInYear) {
-                level = 0;
-                if (hours > 0) level = 1;
-                if (hours >= 2) level = 2;
-                if (hours >= 4) level = 3;
-                if (hours >= 6) level = 4;
+                level = 0; // 0h = inactive (gray)
+                if (hours > 0 && hours < 3) level = 1; // 1-2h = light green
+                if (hours >= 3 && hours < 6) level = 2; // 3-5h = medium-light green
+                if (hours >= 6 && hours < 10) level = 3; // 6-9h = medium-dark green
+                if (hours >= 10) level = 4; // 10+h = dark green (max)
             }
 
             currentWeek.push({ dateStr, level });
@@ -249,13 +249,35 @@ export default function AnioPage() {
                 }
                 bestStreak = Math.max(bestStreak, tempStreak);
 
+                // Calculate current streak (consecutive days up to today)
+                const today = new Date();
+                const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+                let currentStreak = 0;
+
+                // Start from today and go backwards
+                const checkDate = new Date(today);
+                while (true) {
+                    const dateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+                    if (dailyMap.has(dateStr)) {
+                        currentStreak++;
+                        checkDate.setDate(checkDate.getDate() - 1);
+                    } else {
+                        break;
+                    }
+                }
+
+                // If current streak is greater than best streak, update best streak
+                if (currentStreak > bestStreak) {
+                    bestStreak = currentStreak;
+                }
+
                 const totalMinutes = logs.reduce((sum, l) => sum + l.duration_minutes, 0);
 
                 setYearStats({
                     totalHours: totalMinutes / 60,
                     totalDays: dailyMap.size,
                     bestStreak: sortedDates.length > 0 ? bestStreak : 0,
-                    currentStreak: 0, // Simplified
+                    currentStreak,
                     monthlyData,
                     categoryTotals,
                     dailyData: dailyMap,
@@ -312,7 +334,7 @@ export default function AnioPage() {
                             <p className="text-3xl font-bold text-foreground">
                                 {yearStats.totalHours.toFixed(0)}h
                             </p>
-                            <p className="text-sm text-muted-foreground">Horas totales</p>
+                            <p className="text-sm text-muted-foreground">Tiempo total</p>
                         </CardContent>
                     </Card>
                     <Card hover>
@@ -321,7 +343,7 @@ export default function AnioPage() {
                             <p className="text-3xl font-bold text-foreground">
                                 {yearStats.totalDays}
                             </p>
-                            <p className="text-sm text-muted-foreground">Días activos</p>
+                            <p className="text-sm text-muted-foreground">Días productivos</p>
                         </CardContent>
                     </Card>
                     <Card hover>

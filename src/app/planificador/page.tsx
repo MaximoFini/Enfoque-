@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { Card, CardContent } from "@/components/ui/Card";
 import { useAuth } from "@/context/AuthContext";
-import { getCategories, getCurrentUserId, createTimeLog } from "@/lib/supabase/services";
+import { getCategories, getCurrentUserId, createTimeLog, updateTimeLogDuration, isOtherWorkType, parseOtherMetadata } from "@/lib/supabase/services";
 import { getSupabaseClient } from "@/lib/supabase/client";
 import type { Category } from "@/lib/supabase/types";
 import {
@@ -360,22 +360,77 @@ export default function PlanificadorPage() {
     } | null>(null);
     const [copiedBlock, setCopiedBlock] = useState<Omit<TimeBlock, "id" | "day" | "start_hour"> | null>(null);
 
+    // Drag & Drop State
+    const [dragState, setDragState] = useState<{
+        block: TimeBlock;
+        offsetX: number;
+        offsetY: number;
+        currentX: number;
+        currentY: number;
+    } | null>(null);
+
     // Resize state
     const [resizing, setResizing] = useState<{
         blockId: string;
         startY: number;
         originalDuration: number;
+        isLogged?: boolean;
     } | null>(null);
 
-    // Current time for the time indicator
-    const [currentTime, setCurrentTime] = useState(new Date());
+    // Current time for the time indicator (real-time, drift-free)
+    const [currentTime, setCurrentTime] = useState(() => new Date());
 
-    // Update current time every minute
+    // Update current time: immediately on mount, then every minute aligned to :00 seconds
     useEffect(() => {
-        const interval = setInterval(() => {
-            setCurrentTime(new Date());
-        }, 60000);
-        return () => clearInterval(interval);
+        // Update immediately
+        setCurrentTime(new Date());
+
+        // Calculate ms until the next minute boundary to avoid drift
+        const scheduleNextUpdate = () => {
+            const now = new Date();
+            const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+            return setTimeout(() => {
+                setCurrentTime(new Date());
+                // After the first aligned update, continue with 60s intervals
+                intervalRef.current = setInterval(() => {
+                    setCurrentTime(new Date());
+                }, 60000);
+            }, msUntilNextMinute);
+        };
+
+        const intervalRef: { current: ReturnType<typeof setInterval> | null } = { current: null };
+        const timeoutId = scheduleNextUpdate();
+
+        // Re-sync when page becomes visible again (tab switch, minimize, etc.)
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                setCurrentTime(new Date());
+                // Clear existing timers and reschedule aligned to the new minute
+                if (intervalRef.current) {
+                    clearInterval(intervalRef.current);
+                    intervalRef.current = null;
+                }
+                clearTimeout(timeoutId);
+                const now = new Date();
+                const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+                setTimeout(() => {
+                    setCurrentTime(new Date());
+                    intervalRef.current = setInterval(() => {
+                        setCurrentTime(new Date());
+                    }, 60000);
+                }, msUntilNextMinute);
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            clearTimeout(timeoutId);
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+            }
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, []);
 
     // Time slots 6:00 - 23:00
@@ -384,6 +439,8 @@ export default function PlanificadorPage() {
     const fullDayNames = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
     // Calculate week dates
+    // Recalculate when weekOffset changes OR when the current day changes (at midnight)
+    const todayDateString = currentTime.toDateString();
     const weekData = useMemo(() => {
         const today = new Date();
         const currentDay = today.getDay();
@@ -412,7 +469,7 @@ export default function PlanificadorPage() {
         const monthLabel = monthNames[monday.getMonth()] + " " + monday.getFullYear();
 
         return { days, monthLabel, monday, sunday };
-    }, [weekOffset]);
+    }, [weekOffset, todayDateString]);
 
     // Load categories
     useEffect(() => {
@@ -455,16 +512,22 @@ export default function PlanificadorPage() {
                     const startDate = new Date(log.started_at);
                     const dayOfWeek = (startDate.getDay() + 6) % 7; // Mon=0, Sun=6
                     const cat = categories.find((c: Category) => c.id === log.category_id);
+
+                    // Check if this is an "other" work type (stored in notes)
+                    const isOther = isOtherWorkType(log.notes);
+                    const otherMetadata = isOther ? parseOtherMetadata(log.notes) : null;
+
                     return {
                         id: `log_${log.id}`,
-                        title: cat?.name || "Tiempo registrado",
+                        title: otherMetadata?.title || cat?.name || "Tiempo registrado",
                         category_id: log.category_id,
                         day: dayOfWeek,
-                        start_hour: startDate.getHours(),
-                        duration_hours: Math.max(1, Math.round(log.duration_minutes / 60)),
-                        work_type: log.work_type as "deep" | "shallow" | "other",
+                        start_hour: startDate.getHours() + startDate.getMinutes() / 60,
+                        duration_hours: Math.max(0.5, log.duration_minutes / 60),
+                        work_type: (isOther ? "other" : log.work_type) as "deep" | "shallow" | "other",
+                        color: otherMetadata?.color,
                         isLogged: true,
-                    };
+                    } as TimeBlock;
                 });
                 setLoggedBlocks(converted);
             } else {
@@ -542,12 +605,11 @@ export default function PlanificadorPage() {
         return { color: cat?.color || "hsl(var(--primary))", emoji: cat?.emoji || "📋" };
     };
 
-    // Get block at position (from all blocks)
+    // Get block at position (from all blocks) - using Floor to find the "slot"
     const getBlockAt = (day: number, hour: number) => {
         return allBlocks.find((b: TimeBlock) =>
             b.day === day &&
-            hour >= b.start_hour &&
-            hour < b.start_hour + b.duration_hours
+            Math.floor(b.start_hour) === hour // Show in the hour slot where it starts
         );
     };
 
@@ -556,7 +618,8 @@ export default function PlanificadorPage() {
         const now = new Date();
         const blockDate = new Date(weekData.days[day].fullDate);
         if (hour !== undefined) {
-            blockDate.setHours(hour + 1, 0, 0, 0);
+            // Use accurate hour check
+            blockDate.setHours(Math.floor(hour) + 1, 0, 0, 0);
         }
         return blockDate < now;
     };
@@ -612,8 +675,19 @@ export default function PlanificadorPage() {
             blockId: block.id,
             startY: e.clientY,
             originalDuration: block.duration_hours,
+            isLogged: block.isLogged,
         });
     };
+
+    // Refs for state access in event handlers without re-binding
+    const blocksRef = useRef(blocks);
+    const loggedBlocksRef = useRef(loggedBlocks);
+    useEffect(() => {
+        blocksRef.current = blocks;
+    }, [blocks]);
+    useEffect(() => {
+        loggedBlocksRef.current = loggedBlocks;
+    }, [loggedBlocks]);
 
     // Handle resize move
     useEffect(() => {
@@ -622,25 +696,44 @@ export default function PlanificadorPage() {
         const handleMouseMove = (e: MouseEvent) => {
             const deltaY = e.clientY - resizing.startY;
             const hourHeight = 40; // matches min-h-[40px] from time slots
-            const deltaDuration = Math.round((deltaY / hourHeight) * 2) / 2; // snap to 0.5h
-            const newDuration = Math.max(0.5, Math.min(6, resizing.originalDuration + deltaDuration));
+            // Snap to 15 minutes (0.25h) instead of 30 minutes
+            const deltaDuration = Math.round((deltaY / hourHeight) * 4) / 4;
+            const newDuration = Math.max(0.25, Math.min(6, resizing.originalDuration + deltaDuration));
 
-            setBlocks((prev: TimeBlock[]) =>
-                prev.map((b: TimeBlock) =>
-                    b.id === resizing.blockId
-                        ? { ...b, duration_hours: newDuration }
-                        : b
-                )
-            );
+            // Update planned blocks if involved
+            setBlocks((prev: TimeBlock[]) => {
+                const isTarget = prev.some(b => b.id === resizing.blockId);
+                if (!isTarget) return prev;
+                return prev.map((b: TimeBlock) => b.id === resizing.blockId ? { ...b, duration_hours: newDuration } : b);
+            });
+
+            // Update logged blocks if involved
+            setLoggedBlocks((prev: TimeBlock[]) => {
+                const isTarget = prev.some(b => b.id === resizing.blockId);
+                if (!isTarget) return prev;
+                return prev.map((b: TimeBlock) => b.id === resizing.blockId ? { ...b, duration_hours: newDuration } : b);
+            });
         };
 
         const handleMouseUp = () => {
-            // Save to localStorage
-            const currentBlocks = blocks;
-            localStorage.setItem(
-                `planner_blocks_${weekData.monday.toISOString().split('T')[0]}`,
-                JSON.stringify(currentBlocks)
-            );
+            // Logic to save
+            if (resizing.isLogged) {
+                const block = loggedBlocksRef.current.find(b => b.id === resizing.blockId);
+                if (block) {
+                    // Strip "log_" prefix if present
+                    const dbId = block.id.replace("log_", "");
+                    const minutes = Math.round(block.duration_hours * 60);
+                    // Fire and forget update
+                    updateTimeLogDuration(dbId, minutes);
+                }
+            } else {
+                // Save planned blocks to localStorage
+                const currentBlocks = blocksRef.current;
+                localStorage.setItem(
+                    `planner_blocks_${weekData.monday.toISOString().split('T')[0]}`,
+                    JSON.stringify(currentBlocks)
+                );
+            }
             setResizing(null);
         };
 
@@ -650,7 +743,80 @@ export default function PlanificadorPage() {
             document.removeEventListener("mousemove", handleMouseMove);
             document.removeEventListener("mouseup", handleMouseUp);
         };
-    }, [resizing, blocks, weekData]);
+    }, [resizing, weekData]);
+
+    // Handle Drag & Drop Events
+    const handleDragStart = (e: React.MouseEvent, block: TimeBlock) => {
+        // Prevent if resizing or clicking a button
+        if ((e.target as HTMLElement).closest('.resize-handle') || (e.target as HTMLElement).closest('button')) return;
+        if (block.isLogged) return; // Cannot drag logged items
+
+        e.preventDefault();
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+
+        setDragState({
+            block,
+            offsetX: e.clientX - rect.left,
+            offsetY: e.clientY - rect.top,
+            currentX: e.clientX,
+            currentY: e.clientY,
+        });
+    };
+
+    // Global drag effect
+    useEffect(() => {
+        if (!dragState) return;
+
+        const handleMouseMove = (e: MouseEvent) => {
+            setDragState(prev => prev ? { ...prev, currentX: e.clientX, currentY: e.clientY } : null);
+        };
+
+        const handleMouseUp = (e: MouseEvent) => {
+            // Find drop target
+            const element = document.elementFromPoint(e.clientX, e.clientY);
+            const cell = element?.closest('[data-hour][data-day]');
+
+            if (cell && cell instanceof HTMLElement) {
+                const day = parseInt(cell.dataset.day || "0");
+                const hourSlot = parseInt(cell.dataset.hour || "6");
+
+                // Calculate new start time based on relative Y
+                const rect = cell.getBoundingClientRect();
+                // Block top relative to cell top
+                const relativeY = (e.clientY - dragState.offsetY) - rect.top;
+                const hourHeight = rect.height;
+
+                // Calculate fractional hours
+                const addedHours = relativeY / hourHeight;
+                let newStart = hourSlot + addedHours;
+
+                // Snap to 15 mins (0.25)
+                newStart = Math.round(newStart * 4) / 4;
+
+                // Constraints
+                newStart = Math.max(6, Math.min(24 - dragState.block.duration_hours, newStart));
+
+                // Construct new block
+                const updatedBlock = {
+                    ...dragState.block,
+                    day,
+                    start_hour: newStart
+                };
+
+                // Save directly
+                saveBlocks(blocks.map(b => b.id === updatedBlock.id ? updatedBlock : b));
+            }
+
+            setDragState(null);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+        return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [dragState, blocks, saveBlocks]);
 
     // Calculate stats - exclude "other" from deep/shallow counts
     const stats = useMemo(() => {
@@ -859,7 +1025,8 @@ export default function PlanificadorPage() {
                                         </div>
                                         {weekData.days.map((day: { isToday: boolean; isPast: boolean }, dayIndex: number) => {
                                             const block = getBlockAt(dayIndex, hour);
-                                            const isBlockStart = block?.start_hour === hour;
+                                            // Ensure we only render the block in its starting hour slot
+                                            const isBlockStart = block && Math.floor(block.start_hour) === hour;
 
                                             if (block && !isBlockStart) {
                                                 return null;
@@ -868,27 +1035,35 @@ export default function PlanificadorPage() {
                                             return (
                                                 <div
                                                     key={dayIndex}
+                                                    data-day={dayIndex}
+                                                    data-hour={hour}
                                                     className={`border-l border-border/50 relative ${day.isToday ? "bg-primary/5" : day.isPast ? "bg-secondary/20" : ""
                                                         }`}
                                                     style={{
-                                                        gridRow: block
+                                                        // Only apply span if we have a block starting here
+                                                        gridRow: isBlockStart && block
                                                             ? `span ${Math.ceil(block.duration_hours)}`
                                                             : undefined
                                                     }}
                                                     onContextMenu={(e) => handleContextMenu(e, dayIndex, hour, block || undefined)}
                                                 >
-                                                    {block ? (
+                                                    {isBlockStart && block ? (
                                                         <div
-                                                            className="absolute inset-1 rounded-lg text-left text-xs font-medium text-white shadow-sm overflow-hidden cursor-pointer group"
+                                                            className={`absolute inset-x-1 rounded-lg text-left text-xs font-medium text-white shadow-sm overflow-hidden cursor-pointer group ${dragState?.block.id === block.id ? "opacity-20 pointer-events-none" : ""
+                                                                }`}
                                                             style={{
+                                                                top: `calc(${(block.start_hour % 1) * 100}% + 4px)`,
                                                                 backgroundColor: block.work_type === "other"
                                                                     ? block.color
                                                                     : block.work_type === "deep"
                                                                         ? "#8b5cf6"
                                                                         : "#f59e0b",
-                                                                height: `calc(${block.duration_hours * 100}% - 8px)`
+                                                                height: `calc(${block.duration_hours * 100}% - 8px)`,
+                                                                zIndex: 10
                                                             }}
-                                                            onClick={() => {
+                                                            // Mouse down to start drag
+                                                            onMouseDown={(e) => handleDragStart(e, block)}
+                                                            onClick={(e) => {
                                                                 if (!block.isLogged) {
                                                                     setEditingBlock(block);
                                                                     setShowModal(true);
@@ -906,13 +1081,11 @@ export default function PlanificadorPage() {
                                                                     {String(block.start_hour).padStart(2, '0')}:00 - {String(block.start_hour + block.duration_hours).padStart(2, '0')}:00
                                                                 </div>
                                                             </div>
-                                                            {/* Resize handle */}
-                                                            {!block.isLogged && (
-                                                                <div
-                                                                    className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize opacity-0 group-hover:opacity-100 bg-black/20 transition-opacity"
-                                                                    onMouseDown={(e) => handleResizeStart(e, block)}
-                                                                />
-                                                            )}
+                                                            {/* Resize handle available for all blocks */}
+                                                            <div
+                                                                className="resize-handle absolute bottom-0 left-0 right-0 h-3 cursor-ns-resize opacity-0 group-hover:opacity-100 bg-black/20 transition-opacity z-20"
+                                                                onMouseDown={(e) => handleResizeStart(e, block)}
+                                                            />
                                                         </div>
                                                     ) : (
                                                         <button
@@ -976,6 +1149,34 @@ export default function PlanificadorPage() {
                     onDelete={handleDeleteFromMenu}
                     onClose={() => setContextMenu(null)}
                 />
+            )}
+
+            {/* Drag Ghost Item */}
+            {dragState && (
+                <div
+                    className="fixed z-[100] rounded-lg text-left text-xs font-medium text-white shadow-2xl pointer-events-none opacity-90 backdrop-blur-sm"
+                    style={{
+                        left: dragState.currentX - dragState.offsetX,
+                        top: dragState.currentY - dragState.offsetY,
+                        width: "calc((100vw - 32px) / 8 - 8px)", // Approx width of a cell
+                        height: dragState.block.duration_hours * 40, // Base height, dynamic would be better but this is safe fallback
+                        backgroundColor: dragState.block.work_type === "other"
+                            ? dragState.block.color
+                            : dragState.block.work_type === "deep"
+                                ? "#8b5cf6"
+                                : "#f59e0b",
+                        transform: "scale(1.02)",
+                    }}
+                >
+                    <div className="p-2 h-full flex flex-col">
+                        <div className="flex items-center gap-1">
+                            {dragState.block.work_type === "deep" && <Brain className="h-3 w-3" />}
+                            {dragState.block.work_type === "shallow" && <Zap className="h-3 w-3" />}
+                            {dragState.block.work_type === "other" && <Palette className="h-3 w-3" />}
+                            <span className="truncate">{dragState.block.title}</span>
+                        </div>
+                    </div>
+                </div>
             )}
         </MainLayout>
     );

@@ -338,11 +338,11 @@ export async function getTaskStats(userId: string): Promise<{
 
     const today = new Date().toISOString().split('T')[0];
 
+    // Count all tasks including subtasks
     const { data, error } = await supabase
         .from("tasks")
         .select("id, status, completed_at")
-        .eq("user_id", userId)
-        .is("parent_id", null); // Only count parent tasks
+        .eq("user_id", userId);
 
     if (error) {
         console.error("Error fetching task stats:", error);

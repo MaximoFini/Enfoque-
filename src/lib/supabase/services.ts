@@ -79,7 +79,7 @@ export async function deleteWeeklyGoal(
 
 export async function createTimeLog(log: {
     userId: string;
-    categoryId: string;
+    categoryId?: string;
     subcategoryId?: string;
     durationMinutes: number;
     workType: "deep" | "shallow";
@@ -93,7 +93,7 @@ export async function createTimeLog(log: {
         .from("time_logs")
         .insert({
             user_id: log.userId,
-            category_id: log.categoryId,
+            category_id: log.categoryId || null,
             subcategory_id: log.subcategoryId || null,
             duration_minutes: log.durationMinutes,
             work_type: log.workType,
@@ -110,6 +110,107 @@ export async function createTimeLog(log: {
     }
 
     return data;
+}
+
+// Extended version that supports "other" work type
+// Stores metadata in notes field to track original work type and color
+export async function createTimeLogExtended(log: {
+    userId: string;
+    title: string;
+    categoryId?: string;
+    durationMinutes: number;
+    workType: "deep" | "shallow" | "other";
+    color?: string;
+    startedAt: Date;
+    endedAt: Date;
+}): Promise<TimeLog | null> {
+    if (!supabase) return null;
+
+    // For "other" work type, store metadata in notes field
+    // We still need to use "shallow" for the DB constraint, but mark it as "other"
+    const isOther = log.workType === "other";
+    const dbWorkType = isOther ? "shallow" : log.workType;
+
+    // Build notes with metadata
+    const metadata = isOther ? {
+        __type: "other",
+        title: log.title,
+        color: log.color || "#22c55e"
+    } : null;
+
+    const notesValue = metadata ? `__OTHER__${JSON.stringify(metadata)}` : log.title;
+
+    const { data, error } = await supabase
+        .from("time_logs")
+        .insert({
+            user_id: log.userId,
+            category_id: log.categoryId || null,
+            subcategory_id: null,
+            duration_minutes: log.durationMinutes,
+            work_type: dbWorkType,
+            started_at: log.startedAt.toISOString(),
+            ended_at: log.endedAt.toISOString(),
+            notes: notesValue,
+        })
+        .select()
+        .single();
+
+    if (error) {
+        console.error("Error creating extended time log:", error);
+        return null;
+    }
+
+    return data;
+}
+
+// Helper to check if a time log is "other" type
+export function isOtherWorkType(notes: string | null): boolean {
+    return notes?.startsWith("__OTHER__") || false;
+}
+
+// Helper to parse "other" metadata from notes
+export function parseOtherMetadata(notes: string | null): { title: string; color: string } | null {
+    if (!notes?.startsWith("__OTHER__")) return null;
+    try {
+        return JSON.parse(notes.replace("__OTHER__", ""));
+    } catch {
+        return null;
+    }
+}
+
+export async function updateTimeLogDuration(
+    logId: string,
+    durationMinutes: number
+): Promise<boolean> {
+    if (!supabase) return false;
+
+    // First get the started_at to calculate new ended_at
+    const { data: log, error: fetchError } = await supabase
+        .from("time_logs")
+        .select("started_at")
+        .eq("id", logId)
+        .single();
+
+    if (fetchError || !log) return false;
+
+    const startedAt = new Date(log.started_at);
+    // Add duration in milliseconds
+    const endedAt = new Date(startedAt.getTime() + durationMinutes * 60000);
+
+    const { error } = await supabase
+        .from("time_logs")
+        .update({
+            duration_minutes: durationMinutes,
+            ended_at: endedAt.toISOString(),
+        })
+        .eq("id", logId);
+
+    if (error) {
+        console.error("Error updating time log:", error);
+        return false;
+    }
+
+    return true;
 }
 
 export async function getTimeLogsForWeek(
